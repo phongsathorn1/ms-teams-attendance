@@ -1,6 +1,6 @@
 # Microsoft Teams Attendance
 
-This python script made for calculate the attendance date (duration, joining count, join timestamp, leave timestamp) of student.
+This python script made for calculating the attendance data (duration, joining count, join timestamp, leave timestamp) of students.
 
 This script is use `date  modified` as end class time.
 
