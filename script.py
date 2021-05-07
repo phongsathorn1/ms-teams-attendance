@@ -90,4 +90,4 @@ if __name__ == "__main__":
         result_dict["To Timestamp"].append(to_timestamp)
 
     result_df = pd.DataFrame(result_dict)
-    result_df.to_csv("Output_%s.csv" %(filename))
+    result_df.to_csv("Output_%s" %(filename), index=False)
