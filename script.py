@@ -25,69 +25,100 @@ SOFTWARE.
 import pandas as pd
 import datetime
 import pathlib
-import sys
+from glob import glob
+import os
 
 if __name__ == "__main__":
-    filename = sys.argv[1]
+    studentlist_file = input()
+    professsor_name = input().lower()
+
+    writer = pd.ExcelWriter('attendance.xlsx')
     
-    # Get modified time of file (Teacher download file when end class)
-    fname = pathlib.Path(filename)
-    end_datetime = datetime.datetime.fromtimestamp(fname.stat().st_mtime)
+    for filename in glob("csv_files/*.csv"):
+        # Get modified time of file (Teacher download file when end class)
+        fname = pathlib.Path(filename)
+        end_datetime = datetime.datetime.fromtimestamp(fname.stat().st_mtime)
 
-    # Attendance file download from MS Teams using UTF-16 encoding
-    df = pd.read_csv(filename, encoding='UTF-16', sep='\t')
-    df['Timestamp'] = df['Timestamp'].astype('datetime64[ns]')
+        # Attendance file download from MS Teams using UTF-16 encoding
+        df = pd.read_csv(filename, encoding='UTF-16', sep='\t')
+        df['Timestamp'] = df['Timestamp'].astype('datetime64[ns]')
+        start_datetime = df[df['Full Name'].str.lower() == professsor_name].iloc[0]["Timestamp"]
 
-    result_dict = {
-        "Full Name": [],
-        "Duration": [],
-        "Join Counts": [],
-        "From Timestamp": [],
-        "To Timestamp": []
-    }
+        result_dict = {
+            "Full Name": [],
+            "Duration": [],
+            "Join Counts": [],
+            "From Timestamp": [],
+            "To Timestamp": []
+        }
 
-    names = df['Full Name'].unique()
+        names = df['Full Name'].unique()
 
-    for name in names:
-        user_df = df[df["Full Name"] == name]
-        
-        last_start_time = None
-        sum_time = None
-        is_join = False
-        join_count = 0
-        
-        for index, row in user_df.iterrows():
-            action = row['User Action']
-            timestamp = row['Timestamp']
+        for name in names:
+            user_df = df[df["Full Name"] == name].reset_index(drop=True)
+            
+            last_start_time = None
+            sum_time = None
+            is_join = False
+            join_count = 0
+            
+            for index, row in user_df.iterrows():
+                action = row['User Action']
+                timestamp = row['Timestamp']
 
-            if action == 'Joined':
-                last_start_time = timestamp
-                is_join = True
-                join_count += 1
+                if action in ['Joined', 'Joined before']:
+                    last_start_time = timestamp
+                    if last_start_time < start_datetime and index == 0:
+                        last_start_time = start_datetime
+                    is_join = True
+                    join_count += 1
 
-            elif action == 'Left':
-                is_join = False
+                elif action == 'Left':
+                    is_join = False
+                    if not isinstance(sum_time, datetime.timedelta):
+                        sum_time = row['Timestamp'] - last_start_time
+                    else:
+                        sum_time += row['Timestamp'] - last_start_time
+
+            if is_join:
                 if not isinstance(sum_time, datetime.timedelta):
-                    sum_time = row['Timestamp'] - last_start_time
+                    sum_time = end_datetime - last_start_time
                 else:
-                    sum_time += row['Timestamp'] - last_start_time
-
-        if is_join:
-            if not isinstance(sum_time, datetime.timedelta):
-                sum_time = end_datetime - last_start_time
+                    sum_time += end_datetime - last_start_time
+                to_timestamp = end_datetime
             else:
-                sum_time += end_datetime - last_start_time
-            to_timestamp = end_datetime
-        else:
-            to_timestamp = user_df['Timestamp'].iloc[-1]
+                to_timestamp = user_df['Timestamp'].iloc[-1]
 
-        from_timestamp = user_df['Timestamp'].iloc[0]
+            from_timestamp = user_df['Timestamp'].iloc[0]
 
-        result_dict["Full Name"].append(user_df['Full Name'].iloc[0])
-        result_dict["Duration"].append(sum_time)
-        result_dict["Join Counts"].append(join_count)
-        result_dict["From Timestamp"].append(from_timestamp)
-        result_dict["To Timestamp"].append(to_timestamp)
+            result_dict["Full Name"].append(' '.join(user_df['Full Name'].iloc[0].split()))
+            result_dict["Duration"].append(int(sum_time.total_seconds() / 60))
+            result_dict["Join Counts"].append(join_count)
+            result_dict["From Timestamp"].append(from_timestamp)
+            result_dict["To Timestamp"].append(to_timestamp)
 
-    result_df = pd.DataFrame(result_dict)
-    result_df.to_csv("Output_%s" %(filename), index=False)
+        result_df = pd.DataFrame(result_dict)
+
+        class_df = pd.read_excel(studentlist_file, sheet_name='CP63')
+
+        eng_names = []
+        for en_name in class_df['eng name']:
+            eng_names.append(' '.join(en_name.replace('Miss', '').replace('Mr.', '').replace('Ms.', '').split()))
+        class_df['eng name'] = eng_names
+
+        result_df = result_df.rename(columns={"Full Name": "eng name"})
+        result_df = pd.merge(class_df, result_df, how='left', on='eng name')
+        professsor_df = pd.DataFrame({
+            'student_id': [None],
+            'thai name': [None],
+            'eng name': [professsor_name],
+            'Join Counts': [None],
+            'Duration': [int((end_datetime - start_datetime).total_seconds() / 60)],
+            'From Timestamp': [start_datetime], 
+            'To Timestamp': [end_datetime]
+            })
+
+        result_df = pd.concat([professsor_df, result_df], ignore_index=True)
+        result_df.to_excel(writer, sheet_name="%s" %(os.path.basename(filename).replace(".csv", "").replace("-meetingAttendanceList", "-attendance")), index=False, encoding="utf-8")
+
+    writer.save()
